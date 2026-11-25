@@ -1,0 +1,27 @@
+{
+  "name": "zk-bridge",
+  "version": "1.0.0",
+  "description": "Bridge agent: ZKTeco K40 attendance device -> cloud CRM over HTTPS (outbound only)",
+  "private": true,
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "poc": "tsx src/poc.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --test test/outbox.test.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "zkteco-js": "1.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
