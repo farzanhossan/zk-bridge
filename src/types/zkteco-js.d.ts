@@ -59,9 +59,11 @@ declare module 'zkteco-js' {
       logCapacity: number;
     }
 
-    /** Internal ZTCP / ZUDP objects; we only touch `.socket` to harden it. */
+    /** Internal ZTCP / ZUDP objects. We harden `.socket`, and the live listener reads and writes it directly. */
     interface Transport<S> {
       socket: S | null;
+      /** Session ID the device gave on CMD_CONNECT. */
+      sessionId?: number;
     }
   }
 
@@ -95,7 +97,8 @@ declare module 'zkteco-js' {
 
     /**
      * Sends CMD_REG_EVENT and attaches a 'data' listener only if the socket has
-     * none, so nothing else may run on this socket while listening.
+     * none. Not used: the K40 sends nothing to it (it needs CMD_ENABLEDEVICE
+     * first), so src/live-events.ts does this instead.
      */
     getRealTimeLogs(cb: (log: Zkteco.RealTimeLog) => void): Promise<void>;
 

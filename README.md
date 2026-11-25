@@ -17,6 +17,7 @@ K40 (TCP 4370, LAN)  ->  zk-bridge (office laptop)  ->  HTTPS  ->  CRM /device-a
 | Piece | What it does |
 |---|---|
 | `src/device.ts` | Talks to the K40 through `zkteco-js`. Runs one device operation at a time, each on a fresh connection, and pauses the real-time listener around it. |
+| `src/live-events.ts` | The live-punch protocol (start, decode, acknowledge), done here because the library's version gets nothing from the K40. |
 | `src/outbox.ts` | SQLite queue (`data/outbox.db`, WAL). Each punch's key is `deviceUserId|punchedAt`, so pulling the same log again is harmless. |
 | `src/crm-client.ts` | HTTPS client for the four CRM endpoints (`x-device-key` header, 20 s timeout). |
 | `src/commands.ts` | Runs commands queued in the CRM (`SET_USER`, `DELETE_USER`, `SYNC_TIME`, `PULL_ALL`, `GET_USERS`) and acks each result. |
@@ -155,7 +156,7 @@ Because the bridge never clears the device, the K40 log slowly fills up. Watch `
 | `connect ECONNREFUSED <ip>:4370` | Wrong port, or something else is at that IP | Check `DEVICE_PORT` and the device's communication settings. |
 | `ACK_UNAUTH: a Comm Key is set on the K40` | Comm Key is not 0 | Set Comm Key = 0 on the device. |
 | `connect ECONNRESET` / `Real-time connection lost` again and again | Another program is connected to the K40, the network is unstable, or the NIC is power-saving | Close ZKTime or similar. Check the cable and switch. Turn NIC power saving off. Punches are still collected by the full pull. |
-| Live punches don't show, but `Pull: … new` picks them up later | Real-time packets on this firmware differ from what the library expects | Nothing is lost. Punches arrive within `FULL_PULL_INTERVAL_SEC`; lower it (e.g. 120) if needed. |
+| Live punches don't show, but `Pull: … new` picks them up later | Look for `Could not decode a live punch (…)` in the log: this firmware sends a record layout the bridge doesn't know yet | Nothing is lost. Punches arrive within `FULL_PULL_INTERVAL_SEC`; lower it (e.g. 120) if needed. Send the hex from that log line to add the layout to `src/live-events.ts`. |
 | Times in the CRM are off by whole hours | `DEVICE_TIMEZONE` is wrong | Set it to the timezone the K40 clock runs in. Check with `npm run poc`. |
 | Times are off by minutes | The K40 clock drifted | Leave `TIME_SYNC_INTERVAL_HOURS` on, or queue a `SYNC_TIME` command from the CRM. |
 | `HTTP 401` / `HTTP 403` … `check CRM_DEVICE_KEY` | Wrong or revoked device key | Fix `CRM_DEVICE_KEY` in `.env`, then `nssm restart ZKBridge`. Queued punches are kept. |
@@ -234,7 +235,7 @@ All requests send `x-device-key`, `content-type: application/json` and `user-age
 | GET | `/device-api/commands` | | `{ commands: [{ id, type, payload }] }` |
 | POST | `/device-api/commands/:id/ack` | `{ success, result?, error? }` | `{ ok: true }` |
 
-`Punch` is `{ deviceUserId, punchedAt (UTC ISO), state, verifyType, source: 'realtime' | 'pull' }`. `state` (check-in/out…) and `verifyType` (finger, card…) come only from pulled logs. Live punches have `null` for both (see the limitations below).
+`Punch` is `{ deviceUserId, punchedAt (UTC ISO), state, verifyType, source: 'realtime' | 'pull' }`. `state` (check-in/out…) and `verifyType` (finger, card…) come from both pulled logs and live punches; they are `null` only if the device didn't send them.
 
 Commands and their payloads:
 
@@ -273,7 +274,7 @@ The mock also reads `MOCK_PORT`, `MOCK_DEVICE_KEY`, `MOCK_FAIL_PUNCHES` (simulat
 These come from the library. The bridge works around them where it can.
 
 - **No Comm Key support.** The device must use Comm Key 0.
-- **Live punches carry no state or verify type.** A punch seen live is stored first, so when the full pull later sees the same punch, the pulled copy (which has state and verify type) is ignored as a duplicate.
+- **The library's live listener gets nothing from the K40.** `getRealTimeLogs` sends only `CMD_REG_EVENT`, but the K40 sends live punches only to a session that sent `CMD_ENABLEDEVICE` first (checked on a real K40). The bridge does live punches itself in `src/live-events.ts`: it sends `CMD_ENABLEDEVICE` then `CMD_REG_EVENT`, decodes the records (with state and verify type), and answers each with `ACK_OK` like pyzk. The live time matches the pulled log to the second, so the pulled copy is a duplicate.
 - **The UDP fallback never triggers.** It is coded for `ECONNREFUSED`, but the error is already wrapped by then. The K40 speaks TCP, so this doesn't matter. Both record shapes are still handled.
 - **A cut-short download can come back without an error.** A TCP log download that times out partway returns a partial list. The bridge compares the result with the device's log count, logs a warning, and the next pull fills the gap.
 - **The library is chatty and sometimes leaves promises rejected with no handler.** Its console output goes to the log at `debug` level, and stray rejections are logged and ignored.

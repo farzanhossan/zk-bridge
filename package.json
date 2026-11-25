@@ -1,6 +1,6 @@
 {
   "name": "zk-bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bridge agent: ZKTeco K40 attendance device -> cloud CRM over HTTPS (outbound only)",
   "private": true,
   "main": "dist/index.js",
@@ -13,7 +13,7 @@
     "dev": "tsx src/index.ts",
     "poc": "tsx src/poc.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "tsx --test test/outbox.test.ts"
+    "test": "tsx --test test/outbox.test.ts test/live-events.test.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

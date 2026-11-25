@@ -1,13 +1,24 @@
 import Zkteco from 'zkteco-js';
 import { errMsg } from './errors';
+import {
+  ackPacket,
+  CMD_ENABLEDEVICE,
+  CMD_REG_EVENT,
+  decodeAttLog,
+  EF_ATTLOG,
+  eventFlags,
+  type LiveRecord,
+  splitPackets,
+  type ZkPacket,
+} from './live-events';
 import { log } from './logger';
 
 /** A punch normalized from either library record shape. */
 export interface Punch {
   deviceUserId: string; // trimmed string
   punchedAt: string; // ISO-8601 UTC
-  state: number | null; // from pulled TCP logs only
-  verifyType: number | null; // from pulled TCP logs only
+  state: number | null; // check-in/out etc.; null if the device didn't send it
+  verifyType: number | null; // finger, card etc.; null if the device didn't send it
   source: 'realtime' | 'pull';
 }
 
@@ -353,9 +364,7 @@ export class DeviceClient {
     try {
       const zk = await this.openSession((why) => this.onRealtimeLost(gen, why));
       try {
-        await zk.getRealTimeLogs((rec) => this.handleRealtime(rec));
-        guardRealtimeListener(zk);
-        if (!zk.ztcp.socket && !zk.zudp.socket) throw new Error('connection closed right after connecting');
+        await listenForPunches(zk, (rec) => this.handleRealtime(rec));
       } catch (e) {
         await this.closeSession(zk);
         throw e;
@@ -410,11 +419,10 @@ export class DeviceClient {
     return delay;
   }
 
-  private handleRealtime(rec: Zkteco.RealTimeLog): void {
-    const userId = String(rec?.userId ?? '').trim();
-    const at = rec?.attTime;
+  private handleRealtime(rec: LiveRecord): void {
+    const { userId, at } = rec;
     if (!userId || !isValidDate(at)) {
-      log.debug('Ignored a real-time event without a user ID or valid time');
+      log.warn(`Ignored a live punch without a user ID or valid time (user '${userId}'). The next full pull will still collect it.`);
       return;
     }
     if (Math.abs(at.getTime() - Date.now()) > MAX_LIVE_SKEW_MS) {
@@ -424,7 +432,13 @@ export class DeviceClient {
       );
       return;
     }
-    const punch: Punch = { deviceUserId: userId, punchedAt: at.toISOString(), state: null, verifyType: null, source: 'realtime' };
+    const punch: Punch = {
+      deviceUserId: userId,
+      punchedAt: at.toISOString(),
+      state: rec.state,
+      verifyType: rec.verifyType,
+      source: 'realtime',
+    };
     try {
       this.rtOnPunch?.(punch);
     } catch (e) {
@@ -517,23 +531,47 @@ async function checkAuthorized(zk: Zkteco): Promise<void> {
 }
 
 /**
- * The library's real-time 'data' handler decodes packets without length checks;
- * an unexpected packet size would throw inside a socket event and crash the
- * process. Wrap it so a bad packet is logged and skipped. The periodic pull still
- * collects that punch.
+ * Turns on live punches for this session and decodes them ourselves (zkteco-js's
+ * getRealTimeLogs never gets any from the K40: see live-events.ts). Nothing else
+ * may run on this session afterwards, because its replies would be read as events.
  */
-function guardRealtimeListener(zk: Zkteco): void {
+async function listenForPunches(zk: Zkteco, onRecord: (r: LiveRecord) => void): Promise<void> {
+  requireTcp(zk, 'The live listener');
+  assertAck(await zk.executeCmd(CMD_ENABLEDEVICE, ''), 'ENABLEDEVICE');
+  assertAck(await zk.executeCmd(CMD_REG_EVENT, eventFlags(EF_ATTLOG)), 'REG_EVENT');
   const sock = zk.ztcp.socket;
-  if (!sock) return;
-  const listeners = sock.listeners('data') as Array<(d: Buffer) => void>;
-  if (listeners.length !== 1) return;
-  const original = listeners[0];
-  sock.removeListener('data', original);
-  sock.on('data', (data: Buffer) => {
+  if (!sock) throw new Error('connection closed right after connecting');
+
+  let pending: Buffer = Buffer.alloc(0); // start of a packet split over two reads
+  sock.on('data', (chunk: Buffer) => {
+    let packets: ZkPacket[];
     try {
-      original(data);
+      const split = splitPackets(pending.length ? Buffer.concat([pending, chunk]) : chunk);
+      packets = split.packets;
+      pending = split.rest;
     } catch (e) {
-      log.warn(`Could not decode a real-time packet (${data.length} bytes): ${errMsg(e)}`);
+      pending = Buffer.alloc(0);
+      log.warn(`Could not read data on the live connection: ${errMsg(e)}. The next full pull will still collect any punch in it.`);
+      return;
+    }
+    for (const p of packets) {
+      if (p.command !== CMD_REG_EVENT) {
+        log.debug(`Live connection: ignored a packet with command ${p.command}`);
+        continue;
+      }
+      // Acknowledge every event, as pyzk does, so the device never waits for us.
+      if (sock.writable) sock.write(ackPacket(zk.ztcp.sessionId ?? 0, p.replyId));
+      if (p.sessionField !== EF_ATTLOG) {
+        log.debug(`Live connection: ignored event ${p.sessionField}`);
+        continue;
+      }
+      try {
+        const records = decodeAttLog(p.payload);
+        if (!records.length) throw new Error('no record in it');
+        for (const r of records) onRecord(r);
+      } catch (e) {
+        log.warn(`Could not decode a live punch (${p.payload.toString('hex')}): ${errMsg(e)}. The next full pull will still collect it.`);
+      }
     }
   });
 }
