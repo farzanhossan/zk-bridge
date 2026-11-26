@@ -1,0 +1,4 @@
+* text=auto
+# Shell scripts must keep LF line endings, batch files CRLF, whatever the checkout OS.
+*.sh  text eol=lf
+*.cmd text eol=crlf

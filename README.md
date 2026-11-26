@@ -12,6 +12,45 @@ K40 (TCP 4370, LAN)  ->  zk-bridge (office laptop)  ->  HTTPS  ->  CRM /device-a
 - **Live punches arrive within seconds.** A real-time listener stores each punch and sends it immediately.
 - It runs as a native Windows service through NSSM, with no Docker or WSL. It also runs on Linux or a Raspberry Pi.
 
+## Quick setup (one command)
+
+Put the folder where it will stay (`C:\zk-bridge` on Windows, e.g. `~/zk-bridge` on Linux or a Mac), then run:
+
+| System | Command |
+|---|---|
+| **Windows** | Double-click **`setup.cmd`**, or run `.\setup.cmd` in PowerShell |
+| **Linux / Raspberry Pi / Mac** | `./setup.sh` |
+
+It does everything in sections 2 and 6 below for you:
+
+1. **Node.js:** installs the LTS version if it's missing or older than 22.13. It always asks first. It uses winget or the nodejs.org installer on Windows, NodeSource on Linux and Homebrew on a Mac.
+2. **Packages and build:** `npm ci` and `npm run build`.
+3. **Settings:** asks for the K40 address, port and timezone, the CRM address and the device key. Enter keeps the value shown. Each value is checked with the bridge's own config rules before `.env` is written, and the previous `.env` is kept as `.env.bak`.
+4. **K40 check:** checks the K40 answers, and offers the full device test (`npm run poc`).
+5. **Service:** installs it so it starts at boot and restarts after a crash. Windows: the `ZKBridge` NSSM service (NSSM is downloaded to `C:\tools\nssm` and its checksum checked). Linux: a systemd unit. Mac: a launchd daemon.
+6. **Check:** waits until the log says `Bridge running`, then prints a summary. On Windows it also offers the laptop power settings from WINDOWS-SETUP.md step 10.
+
+Running it again is safe. It keeps your settings as defaults, rebuilds and restarts the service. `--yes` skips the questions and uses `.env` as it is.
+
+| `./setup.sh …` or `setup.cmd …` | What it does |
+|---|---|
+| *(nothing)* | The full setup above |
+| `status` | Is the service running, plus the last `Status:` line |
+| `logs` | Follow the log (Ctrl+C stops watching; the bridge keeps running) |
+| `start` / `stop` / `restart` | Control the service |
+| `test` | Device test. Stops the service during the test and starts it again after |
+| `info` | Show the current settings (the key is masked) |
+| `update` | `git pull` (if it's a git folder), `npm ci`, build, restart |
+| `uninstall` | Remove the service. Keeps `.env`, `data/` and `logs/` |
+
+Notes:
+
+- **Windows** asks once for Administrator rights (UAC) and continues in a new Administrator window. That window stays open until you press Enter.
+- **Mac:** macOS doesn't let background services read Desktop, Documents or Downloads, so move the folder out of those first (the script warns you). The Mac log (`logs/bridge.log`) isn't rotated.
+- **Linux:** the service runs as the user who ran `./setup.sh` (don't use `sudo`; it asks when needed). The log is in journald (`./setup.sh logs`). On a 32-bit Raspberry Pi OS, install Node.js 22.13+ yourself first, or use the 64-bit OS.
+
+The manual steps below still work if you'd rather do it by hand.
+
 ## How it works
 
 | Piece | What it does |

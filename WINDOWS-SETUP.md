@@ -8,6 +8,10 @@ This setup is for:
 
 Plan for about 45 minutes. Do the steps in order. Each step says what you should see before you move on.
 
+> **Quick way (about 10 minutes):** do steps 1 to 3, then double-click **`C:\zk-bridge\setup.cmd`** and answer its questions. Click **Yes** when Windows asks for Administrator rights. It does steps 4 to 9 and the power settings of step 10 for you: it installs Node.js and NSSM, asks for the settings and writes `.env`, checks the K40, builds, installs the `ZKBridge` service and waits until it runs. After that, do the rest of step 10 (Wi-Fi signal, Windows Update hours, UPS, clock) and the final check in step 11.
+>
+> Later: `setup.cmd status`, `setup.cmd logs`, `setup.cmd restart`, `setup.cmd update` (run them in PowerShell from `C:\zk-bridge`). `setup.cmd help` lists them all.
+
 ---
 
 ## What you need
@@ -93,7 +97,7 @@ Put the folder at **`C:\zk-bridge`**.
 
 ```bash
 cd ~/Desktop/Workspace/ZKTeco-bridge-agent
-zip -r ~/Desktop/zk-bridge.zip . -x 'node_modules/*' 'dist/*' 'data/*' 'logs/*' '.env' '*.err.log'
+zip -r ~/Desktop/zk-bridge.zip . -x 'node_modules/*' 'dist/*' 'data/*' 'logs/*' '.env' '.env.bak' '*.err.log'
 ```
 
 **On the laptop:**

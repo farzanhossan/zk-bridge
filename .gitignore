@@ -3,4 +3,6 @@ dist/
 data/
 logs/
 .env
+.env.bak
+.env.tmp
 *.err.log
